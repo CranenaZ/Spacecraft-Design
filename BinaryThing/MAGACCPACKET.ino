@@ -44,29 +44,41 @@ void loop() {
   readRawMagnetometer();
   readRawMPU6050();
 
-  // Print Magnetometer data
+  // Combine and print Magnetometer data
   Serial.println("Magnetometer:");
-  printAll("X", mx, convertToFloatMagnetometer(mx));
-  printAll("Y", my, convertToFloatMagnetometer(my));
-  printAll("Z", mz, convertToFloatMagnetometer(mz));
+  String combinedBinary = "";
+  String combinedHex = "";
+  
+  combinedBinary += printAll("X", mx, convertToFloatMagnetometer(mx));
+  combinedBinary += printAll("Y", my, convertToFloatMagnetometer(my));
+  combinedBinary += printAll("Z", mz, convertToFloatMagnetometer(mz));
 
   // Print the direction based on magnetometer data
   String direction = decodeDirection(mx, my);
   Serial.print("Direction: ");
   Serial.println(direction);
 
-  // Print Accelerometer data
+  // Combine and print Accelerometer data
   Serial.println("Accelerometer:");
-  printAll("X", ax, convertToFloatAccel(ax));
-  printAll("Y", ay, convertToFloatAccel(ay));
-  printAll("Z", az, convertToFloatAccel(az));
+  combinedBinary += printAll("X", ax, convertToFloatAccel(ax));
+  combinedBinary += printAll("Y", ay, convertToFloatAccel(ay));
+  combinedBinary += printAll("Z", az, convertToFloatAccel(az));
 
-  // Print Gyroscope data
+  // Combine and print Gyroscope data
   Serial.println("Gyroscope:");
-  printAll("X", gx, convertToFloatGyro(gx));
-  printAll("Y", gy, convertToFloatGyro(gy));
-  printAll("Z", gz, convertToFloatGyro(gz));
+  combinedBinary += printAll("X", gx, convertToFloatGyro(gx));
+  combinedBinary += printAll("Y", gy, convertToFloatGyro(gy));
+  combinedBinary += printAll("Z", gz, convertToFloatGyro(gz));
 
+  // Print combined binary
+  Serial.print("Combined Binary: ");
+  Serial.println(combinedBinary);
+
+  // Convert combined binary to hexadecimal
+  combinedHex = binaryToHex(combinedBinary);
+  Serial.print("Combined Hex: 0x");
+  Serial.println(combinedHex);
+  
   Serial.println("-----------------------------");
   delay(5000);
 }
@@ -169,25 +181,42 @@ float decodeSignedScaledByte(byte data, float scale = 3.0) {
   return isNegative ? -value : value;
 }
 
-// 11. Print data in different formats
-void printAll(String axis, int16_t rawData, float convertedData) {
+// 11. Print data in different formats and return the binary string
+String printAll(String axis, int16_t rawData, float convertedData) {
   byte binVal = convertToSignedScaledByte(convertedData);
   String hexVal = convertToHex(binVal);
   float decoded = decodeSignedScaledByte(binVal);
 
+  String binaryStr = "";
+  for (int i = 7; i >= 0; i--) {
+    binaryStr += String(bitRead(binVal, i));
+  }
+
+  // Print individual data
   Serial.print(axis);
   Serial.print(": RAW=");
   Serial.print(rawData);
   Serial.print(", FLOAT=");
   Serial.print(convertedData, 2);
   Serial.print(", BIN=");
-
-  for (int i = 7; i >= 0; i--) {
-    Serial.print(bitRead(binVal, i));
-  }
+  Serial.print(binaryStr);
 
   Serial.print(", HEX=0x");
   Serial.print(hexVal);
   Serial.print(", DECODED=");
   Serial.println(decoded, 2);
+
+  // Return the binary string
+  return binaryStr;
+}
+
+// 12. Convert combined binary string to hexadecimal string
+String binaryToHex(String binary) {
+  String hex = "";
+  int length = binary.length();
+  for (int i = 0; i < length; i += 4) {
+    String chunk = binary.substring(i, i + 4);
+    hex += String(strtol(chunk.c_str(), NULL, 2), HEX);
+  }
+  return hex;
 }
