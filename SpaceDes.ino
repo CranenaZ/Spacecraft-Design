@@ -1,93 +1,67 @@
 #include <Wire.h>
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_HMC5883_U.h>
 #include <Adafruit_MPU6050.h>
 #include "MAX471.h"
 
-// Create instances of the sensors
+// Create sensor instances
 Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
 Adafruit_MPU6050 mpu;
+TinyGPSPlus gps;
+SoftwareSerial gpsSerial(2, 3); // RX, TX
 
-// Raw data for the magnetometer
+// Raw data containers
 int16_t mx, my, mz;
-
-// Raw sensor data for MPU6050
 int16_t ax, ay, az, gx, gy, gz;
 
-// Max471 test parameters
-#define TEST_DELAY delay(2000);
 #define VT_PIN A0
 #define AT_PIN A1
-
-// Initialize MAX471 sensor (using 10-bit ADC, Vcc from battery, and pins for current and voltage measurement)
 MAX471 myMax471(ADC_10_bit , VCC_BAT, AT_PIN, VT_PIN);
 
-void setup() {
-  Serial.begin(115200);
-  while (!Serial);
-
-  // Initialize magnetometer
-  if (!mag.begin()) {
-    while (1);
-  }
-
-  // Initialize MPU6050
-  if (!mpu.begin()) {
-    while (1);
-  }
-
-  // Set ranges for sensors
-  mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
-  mpu.setGyroRange(MPU6050_RANGE_250_DEG);
-
-  // Initialize MAX471 sensor
-  Serial.println("== START COMBINED SENSOR TEST ==");
+// Helper functions
+String toBinary(unsigned long val, int bits) {
+  String s = "";
+  for (int i = bits - 1; i >= 0; i--) s += (val >> i) & 1;
+  return s;
 }
 
-void loop() {
-  // Read data from HMC5883L (magnetometer)
-  readRawMagnetometer();
-  
-  // Read data from MPU6050 (accelerometer and gyroscope)
-  readRawMPU6050();
-
-  // Convert magnetometer and MPU6050 data to binary and hex
-  String combinedBinary = "";
-  combinedBinary += collectBinary(mx, convertToFloatMagnetometer(mx));
-  combinedBinary += collectBinary(my, convertToFloatMagnetometer(my));
-  combinedBinary += collectBinary(mz, convertToFloatMagnetometer(mz));
-
-  combinedBinary += collectBinary(ax, convertToFloatAccel(ax));
-  combinedBinary += collectBinary(ay, convertToFloatAccel(ay));
-  combinedBinary += collectBinary(az, convertToFloatAccel(az));
-
-  combinedBinary += collectBinary(gx, convertToFloatGyro(gx));
-  combinedBinary += collectBinary(gy, convertToFloatGyro(gy));
-  combinedBinary += collectBinary(gz, convertToFloatGyro(gz));
-
-  String combinedHex = binaryToHex(combinedBinary);
-
-  // Read data from MAX471 (current and voltage)
-  float current = myMax471.CurrentRead();
-  float voltage = myMax471.VoltageRead();
-  
-  // Convert current and voltage data to binary and hex
-  String currentBinary = formatToBinary(current, "current");
-  String voltageBinary = formatToBinary(voltage, "voltage");
-  String max471CombinedBinary = voltageBinary + currentBinary;
-  String max471CombinedHex = String(strtol(max471CombinedBinary.c_str(), NULL, 2), HEX);
-
-  // Combine both the hex strings
-  String finalCombinedHex = combinedHex + max471CombinedHex;
-
-  // Print the final combined hex
-  Serial.print("Combined Hex: ");
-  Serial.println(finalCombinedHex);  // This prints the final long hex string
-
-  TEST_DELAY;
+String padHex(const String& hexStr, int width) {
+  String s = hexStr;
+  while (s.length() < width) s = "0" + s;
+  return s;
 }
 
-// Read raw data from HMC5883L
+String encodeTime(uint8_t mo, uint8_t d, uint8_t y, uint8_t h, uint8_t m, uint8_t s) {
+  return toBinary(mo,4) + toBinary(d,5) + toBinary(y,6)
+       + toBinary(h,5) + toBinary(m,6) + toBinary(s,6);
+}
+
+String encodeCoordinate(float coord) {
+  String b = "";
+  b += (coord < 0) ? '1' : '0';
+  if (coord < 0) coord = -coord;
+  int whole = int(coord);
+  b += toBinary(whole,8);
+  unsigned long frac = (coord - whole) * 10000000UL;
+  if (frac > 0x7FFFFF) frac = 0x7FFFFF;
+  b += toBinary(frac,23);
+  return b;
+}
+
+String encodeAltitude(float alt) {
+  String b = "";
+  b += (alt < 0) ? '1' : '0';
+  if (alt < 0) alt = -alt;
+  unsigned int w = (unsigned int)alt;
+  unsigned int f = (unsigned int)((alt - w) * 100);
+  if (f > 127) f = 127;
+  b += toBinary(w,16);
+  b += toBinary(f,7);
+  return b;
+}
+
 void readRawMagnetometer() {
   sensors_event_t event;
   mag.getEvent(&event);
@@ -96,17 +70,15 @@ void readRawMagnetometer() {
   mz = event.magnetic.z;
 }
 
-// Read raw data from MPU6050
 void readRawMPU6050() {
   Wire.beginTransmission(0x68);
   Wire.write(0x3B);
   Wire.endTransmission(false);
   Wire.requestFrom(0x68, 14, true);
-
   ax = (Wire.read() << 8) | Wire.read();
   ay = (Wire.read() << 8) | Wire.read();
   az = (Wire.read() << 8) | Wire.read();
-  Wire.read(); Wire.read(); // skip temp
+  Wire.read(); Wire.read();
   gx = (Wire.read() << 8) | Wire.read();
   gy = (Wire.read() << 8) | Wire.read();
   gz = (Wire.read() << 8) | Wire.read();
@@ -123,7 +95,7 @@ float convertToFloatAccel(int16_t raw) {
 float convertToFloatGyro(int16_t raw) {
   float degPerSec = raw / 131.0;
   return degPerSec * (PI / 180.0);
- }
+}
 
 byte convertToSignedScaledByte(float value, float scale = 3.0) {
   bool isNegative = value < 0;
@@ -152,50 +124,90 @@ String binaryToHex(String binary) {
   return hex;
 }
 
-// Function to convert a floating point value to binary with specified bit allocation
 String formatToBinary(float value, String type) {
-  int wholePart;
-  int decimalPart;
-
-  // Voltage takes 4 bits for the whole number and 7 bits for the decimal part
-  if (type == "voltage") {
-    wholePart = (int)value;  // Get the whole number part (max 8)
-    decimalPart = (int)((value - wholePart) * 100);  // Get the first 2 decimal places (scaled by 100)
-  }
-  // Current takes 2 bits for the whole number and 7 bits for the decimal part
-  else if (type == "current") {
-    wholePart = (int)value;  // Get the whole number part (max 3)
-    decimalPart = (int)((value - wholePart) * 100);  // Get the first 2 decimal places (scaled by 100)
-  }
-
-  // Convert to binary
+  int wholePart = (int)value;
+  int decimalPart = (int)((value - wholePart) * 100);
   String wholeBinary = String(wholePart, BIN);
   String decimalBinary = String(decimalPart, BIN);
 
-  // Ensure binary formats are padded to the required bit length
   if (type == "voltage") {
-    // Voltage: 4 bits for whole part, 7 bits for decimal
-    wholeBinary = wholeBinary.length() > 4 ? wholeBinary.substring(wholeBinary.length() - 4) : wholeBinary;
-    decimalBinary = decimalBinary.length() > 7 ? decimalBinary.substring(decimalBinary.length() - 7) : decimalBinary;
-    while (wholeBinary.length() < 4) {
-      wholeBinary = "0" + wholeBinary;
-    }
-    while (decimalBinary.length() < 7) {
-      decimalBinary = "0" + decimalBinary;
-    }
+    while (wholeBinary.length() < 4) wholeBinary = "0" + wholeBinary;
+    while (decimalBinary.length() < 7) decimalBinary = "0" + decimalBinary;
+    return wholeBinary + decimalBinary;
+  } else {
+    while (wholeBinary.length() < 2) wholeBinary = "0" + wholeBinary;
+    while (decimalBinary.length() < 7) decimalBinary = "0" + decimalBinary;
+    return wholeBinary + decimalBinary;
   }
-  else if (type == "current") {
-    // Current: 2 bits for whole part, 7 bits for decimal
-    wholeBinary = wholeBinary.length() > 2 ? wholeBinary.substring(wholeBinary.length() - 2) : wholeBinary;
-    decimalBinary = decimalBinary.length() > 7 ? decimalBinary.substring(decimalBinary.length() - 7) : decimalBinary;
-    while (wholeBinary.length() < 2) {
-      wholeBinary = "0" + wholeBinary;
-    }
-    while (decimalBinary.length() < 7) {
-      decimalBinary = "0" + decimalBinary;
-    }
+}
+
+String getCombinedHex() {
+  readRawMagnetometer();
+  readRawMPU6050();
+
+  String combinedBinary = "";
+  combinedBinary += collectBinary(mx, convertToFloatMagnetometer(mx));
+  combinedBinary += collectBinary(my, convertToFloatMagnetometer(my));
+  combinedBinary += collectBinary(mz, convertToFloatMagnetometer(mz));
+  combinedBinary += collectBinary(ax, convertToFloatAccel(ax));
+  combinedBinary += collectBinary(ay, convertToFloatAccel(ay));
+  combinedBinary += collectBinary(az, convertToFloatAccel(az));
+  combinedBinary += collectBinary(gx, convertToFloatGyro(gx));
+  combinedBinary += collectBinary(gy, convertToFloatGyro(gy));
+  combinedBinary += collectBinary(gz, convertToFloatGyro(gz));
+
+  float current = myMax471.CurrentRead();
+  float voltage = myMax471.VoltageRead();
+  String currentBinary = formatToBinary(current, "current");
+  String voltageBinary = formatToBinary(voltage, "voltage");
+  combinedBinary += voltageBinary + currentBinary;
+
+  if (gps.location.isUpdated() && gps.altitude.isUpdated()
+      && gps.date.isUpdated() && gps.time.isUpdated()) {
+    uint8_t mo = gps.date.month();
+    uint8_t d  = gps.date.day();
+    uint8_t y  = gps.date.year() - 2000;
+    uint8_t h  = gps.time.hour();
+    uint8_t mi = gps.time.minute();
+    uint8_t se = gps.time.second();
+    float lat = gps.location.lat();
+    float lon = gps.location.lng();
+    float alt = gps.altitude.meters();
+
+    String tBin = encodeTime(mo,d,y,h,mi,se);
+    String latBin = encodeCoordinate(lat);
+    String lonBin = encodeCoordinate(lon);
+    String altBin = encodeAltitude(alt);
+
+    combinedBinary += tBin + latBin + lonBin + altBin;
   }
 
-  // Combine and return the final binary string
-  return wholeBinary + decimalBinary;
+  return binaryToHex(combinedBinary);
+}
+
+unsigned long lastPrint = 0;
+const unsigned long interval = 3000;
+
+void setup() {
+  Serial.begin(115200);
+  gpsSerial.begin(9600);
+  Wire.begin();
+
+  if (!mag.begin()) while (1);
+  if (!mpu.begin()) while (1);
+
+  mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
+  mpu.setGyroRange(MPU6050_RANGE_250_DEG);
+  Serial.println("== START SENSOR + GPS COMBINED ==");
+}
+
+void loop() {
+  while (gpsSerial.available()) gps.encode(gpsSerial.read());
+
+  if (millis() - lastPrint >= interval) {
+    lastPrint = millis();
+    String combinedHex = getCombinedHex();
+    Serial.print("Combined Hex: "); Serial.println(combinedHex);
+    Serial.println("---");
+  }
 }
