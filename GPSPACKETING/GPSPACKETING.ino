@@ -13,6 +13,15 @@ String toBinary(unsigned long val, int bits) {
   return s;
 }
 
+// Pad a hex string with leading zeros to desired width
+String padHex(const String& hexStr, int width) {
+  String s = hexStr;
+  while (s.length() < width) {
+    s = "0" + s;
+  }
+  return s;
+}
+
 // ========== TIME ENCODING ==========
 String encodeTime(uint8_t month, uint8_t day, uint8_t year, uint8_t hour, uint8_t minute, uint8_t second) {
   return toBinary(month, 4) +
@@ -112,11 +121,16 @@ void loop() {
       float decodedLon = decodeCoordinate(lonBin);
       float decodedAlt = decodeAltitude(altBin);
 
+      // Convert binaries to hex strings
+      String timeHex = padHex(String(strtoul(timeBin.c_str(), nullptr, 2), HEX), 8);
+      String latHex  = padHex(String(strtoul(latBin.c_str(),  nullptr, 2), HEX), 8);
+      String lonHex  = padHex(String(strtoul(lonBin.c_str(),  nullptr, 2), HEX), 8);
+      String altHex  = padHex(String(strtoul(altBin.c_str(),  nullptr, 2), HEX), 6);
+
       // === OUTPUT ===
       Serial.println("========== PACKET ==========");
 
-      Serial.print("Time: ");
-      Serial.print(month); Serial.print("/");
+      Serial.print("Time: "); Serial.print(month); Serial.print("/");
       Serial.print(day); Serial.print("/");
       Serial.print(2000 + year); Serial.print(" ");
       Serial.print(hour); Serial.print(":");
@@ -124,31 +138,36 @@ void loop() {
       Serial.println(second);
 
       Serial.print("Time Bin: "); Serial.println(timeBin);
-      Serial.print("Time Hex: "); Serial.println(String(strtoul(timeBin.c_str(), nullptr, 2), HEX));
+      Serial.print("Time Hex: "); Serial.println(timeHex);
 
       Serial.println();
 
       Serial.print("Lat: "); Serial.println(lat, 7);
       Serial.print("Lat Bin: "); Serial.println(latBin);
-      Serial.print("Lat Hex: "); Serial.println(String(strtoul(latBin.c_str(), nullptr, 2), HEX));
+      Serial.print("Lat Hex: "); Serial.println(latHex);
       Serial.print("Decoded Lat: "); Serial.println(decodedLat, 7);
 
       Serial.println();
 
       Serial.print("Lon: "); Serial.println(lon, 7);
       Serial.print("Lon Bin: "); Serial.println(lonBin);
-      Serial.print("Lon Hex: "); Serial.println(String(strtoul(lonBin.c_str(), nullptr, 2), HEX));
+      Serial.print("Lon Hex: "); Serial.println(lonHex);
       Serial.print("Decoded Lon: "); Serial.println(decodedLon, 7);
 
       Serial.println();
 
       Serial.print("Alt: "); Serial.print(alt); Serial.println(" m");
       Serial.print("Alt Bin: "); Serial.println(altBin);
-      Serial.print("Alt Hex: "); Serial.println(String(strtoul(altBin.c_str(), nullptr, 2), HEX));
+      Serial.print("Alt Hex: "); Serial.println(altHex);
       Serial.print("Decoded Alt: "); Serial.print(decodedAlt); Serial.println(" m");
 
-      Serial.println("============================\n");
+      // === COMBINED HEX ===
+      String combinedHex = timeHex + latHex + lonHex + altHex;
+      Serial.println();
+      Serial.print("Combined (Time+Lat+Lon+Alt) Hex: ");
+      Serial.println(combinedHex);
 
+      Serial.println("============================\n");
       delay(3000);
     }
   }
