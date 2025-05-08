@@ -121,8 +121,9 @@ float convertToFloatAccel(int16_t raw) {
 }
 
 float convertToFloatGyro(int16_t raw) {
-  return raw / 131.0;
-}
+  float degPerSec = raw / 131.0;
+  return degPerSec * (PI / 180.0);
+ }
 
 byte convertToSignedScaledByte(float value, float scale = 3.0) {
   bool isNegative = value < 0;
